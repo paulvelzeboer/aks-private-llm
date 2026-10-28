@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# vLLM: OpenAI-compatible inference server on the GPU pool.
+# Image and weights both come from private, in-VNet sources. The container has
+# no egress (enforced by the llm/default-deny NetworkPolicy); it loads weights
+# from the mounted blob volume and serves on :8000.
+#
+# Swap MODEL_PATH / --served-model-name for your model. Example target below is
+# a 70B-class instruct model that fits one A100 80GB at the shown settings;
+# adjust --tensor-parallel-size to the GPU count per node.
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: llm
+  labels: { app: vllm }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: vllm }
+  template:
+    metadata:
+      labels: { app: vllm }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      nodeSelector:
+        workload: llm
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Equal
+          value: present
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          # Seed this image into ACR first (scripts/seed-artifacts.sh).
+          image: acrprivllm.azurecr.io/vllm/vllm-openai:v0.6.3
+          args:
+            - --model=/models/current
+            - --served-model-name=private-llm
+            - --host=0.0.0.0
+            - --port=8000
+            - --tensor-parallel-size=1
+            - --max-model-len=16384
+            - --gpu-memory-utilization=0.92
+            - --disable-log-requests=false   # request metadata -> stdout -> Log Analytics
+          ports:
+            - containerPort: 8000
+          env:
+            - name: HF_HUB_OFFLINE
+              value: "1"               # never attempt a HuggingFace fetch
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: 160Gi
+            requests:
+              cpu: "8"
+              memory: 120Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - { name: models, mountPath: /models, readOnly: true }
+            - { name: shm, mountPath: /dev/shm }
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 300
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: false   # vLLM image runs as root; tighten with a custom image
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: models
+          persistentVolumeClaim: { claimName: models-pvc }
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 16Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: llm
+  labels: { app: vllm }
+spec:
+  selector: { app: vllm }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }
+  type: ClusterIP

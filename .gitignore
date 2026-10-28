@@ -1,0 +1,31 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+.terraformrc
+terraform.rc
+
+# Secrets / credentials — never commit real values
+*.pem
+*.key
+kubeconfig
+*.kubeconfig
+.env
+
+# Local model weights (seed them to blob, don't commit)
+model/
+weights/
+*.safetensors
+*.gguf
+*.bin
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

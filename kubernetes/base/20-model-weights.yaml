@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------
+# Model weights mounted from the private blob container seeded in step "seed".
+# The Azure Blob CSI driver (built into AKS) mounts the EXISTING container over
+# its private endpoint — no internet, no HuggingFace download at runtime.
+#
+# The storage key lives in this secret; populate it from Terraform output or
+# Key Vault. Replace <ACCOUNT> / <BASE64_KEY> during deploy (see scripts).
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: models-blob
+  namespace: llm
+type: Opaque
+data:
+  azurestorageaccountname: <BASE64_ACCOUNT_NAME>
+  azurestorageaccountkey: <BASE64_ACCOUNT_KEY>
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: models-pv
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - -o allow_other
+    - --file-cache-timeout-in-seconds=120
+    - --read-only=true
+  csi:
+    driver: blob.csi.azure.com
+    volumeHandle: models-weights
+    volumeAttributes:
+      containerName: weights
+    nodeStageSecretRef:
+      name: models-blob
+      namespace: llm
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-pvc
+  namespace: llm
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 500Gi
+  volumeName: models-pv

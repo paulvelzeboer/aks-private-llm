@@ -1,0 +1,48 @@
+// =====================================================================
+// Audit & monitoring queries (Log Analytics / Azure Monitor).
+// Container Insights + the firewall diagnostic setting (both wired up in
+// Terraform) stream everything needed here — no extra agent required.
+// =====================================================================
+
+// ---- 1. Every LLM request/response through the gateway -------------------
+// LiteLLM logs each call (who, which model, tokens, latency) to stdout.
+ContainerLogV2
+| where PodNamespace == "gateway" and ContainerName == "litellm"
+| where LogMessage has "litellm" or LogMessage has "\"model\""
+| project TimeGenerated, PodName, LogMessage
+| order by TimeGenerated desc
+
+// ---- 2. Blocked egress: proof the air-gap holds --------------------------
+// Any node attempt to leave the VNet that the firewall denied.
+AZFWApplicationRule
+| where Action == "Deny"
+| summarize attempts = count() by Fqdn, SourceIp, bin(TimeGenerated, 5m)
+| order by TimeGenerated desc
+// Network-layer denies (non-HTTP egress attempts):
+// AZFWNetworkRule | where Action == "Deny" | order by TimeGenerated desc
+
+// ---- 3. Allowed egress audit (should only be AKS platform FQDNs) ---------
+AZFWApplicationRule
+| where Action == "Allow"
+| summarize count() by Fqdn
+| order by count_ desc
+
+// ---- 4. GPU node health & utilization ------------------------------------
+InsightsMetrics
+| where Namespace == "container.azm.ms/gpu" or Name startswith "nvidia"
+| summarize avg(Val) by Name, bin(TimeGenerated, 5m)
+| order by TimeGenerated desc
+
+// ---- 5. Who called with which virtual key (attribution) ------------------
+ContainerLogV2
+| where PodNamespace == "gateway" and ContainerName == "litellm"
+| where LogMessage has "user" or LogMessage has "api_key"
+| project TimeGenerated, LogMessage
+| order by TimeGenerated desc
+
+// ---- 6. Alert candidate: any egress Deny spike ---------------------------
+// Wire this as a scheduled query alert (fires if the air-gap is probed).
+AZFWApplicationRule
+| where Action == "Deny"
+| summarize denies = count() by bin(TimeGenerated, 15m)
+| where denies > 0

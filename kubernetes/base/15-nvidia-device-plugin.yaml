@@ -1,0 +1,34 @@
+# NVIDIA device plugin so Kubernetes can schedule nvidia.com/gpu. The AKS GPU
+# node image ships the driver; this DaemonSet advertises the resource. Image is
+# served from ACR (seed it first) — nodes have no internet to pull from nvcr.io.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin
+  namespace: kube-system
+  labels: { app: nvidia-device-plugin }
+spec:
+  selector:
+    matchLabels: { app: nvidia-device-plugin }
+  updateStrategy: { type: RollingUpdate }
+  template:
+    metadata:
+      labels: { app: nvidia-device-plugin }
+    spec:
+      priorityClassName: system-node-critical
+      nodeSelector:
+        accelerator: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: nvidia-device-plugin
+          image: acrprivllm.azurecr.io/nvidia/k8s-device-plugin:v0.16.2
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - { name: device-plugin, mountPath: /var/lib/kubelet/device-plugins }
+      volumes:
+        - name: device-plugin
+          hostPath: { path: /var/lib/kubelet/device-plugins }

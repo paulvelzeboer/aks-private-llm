@@ -1,0 +1,106 @@
+# ---------------------------------------------------------------------------
+# LiteLLM proxy = the control & audit plane. It is the ONLY thing clients talk
+# to. It exposes an OpenAI-compatible API, enforces per-client virtual API keys,
+# applies rate/budget limits, and logs every request + response to stdout, which
+# the AKS OMS agent ships to Log Analytics. Nothing reaches vLLM except through
+# here, so every prompt and completion is attributable and retained.
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: gateway
+data:
+  config.yaml: |
+    model_list:
+      - model_name: private-llm
+        litellm_params:
+          model: hosted_vllm/private-llm
+          api_base: http://vllm.llm.svc.cluster.local:8000/v1
+          api_key: "none"
+
+    litellm_settings:
+      drop_params: true
+      # Full-fidelity audit: prompts and completions go to the container log.
+      success_callback: ["logging"]
+      failure_callback: ["logging"]
+      turn_off_message_logging: false
+      # Expose request/latency/token metrics at :4000/metrics for Prometheus.
+      callbacks: ["prometheus"]
+
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+      # Virtual keys, budgets and audit history persist in Postgres. For a
+      # stateless start, omit database_url and manage keys via master_key only.
+      database_url: os.environ/DATABASE_URL
+      enforce_user_param: true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: litellm-secrets
+  namespace: gateway
+type: Opaque
+stringData:
+  # Replace at deploy time (pull from Key Vault). This key mints client keys.
+  LITELLM_MASTER_KEY: "sk-REPLACE-ME-MASTER"
+  DATABASE_URL: "postgresql://litellm:REPLACE@postgres.gateway.svc.cluster.local:5432/litellm"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: gateway
+  labels: { app: litellm }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: litellm }
+  template:
+    metadata:
+      labels: { app: litellm }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: litellm
+          image: acrprivllm.azurecr.io/berriai/litellm:main-stable
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef: { name: litellm-secrets }
+          volumeMounts:
+            - { name: config, mountPath: /etc/litellm }
+          readinessProbe:
+            httpGet: { path: /health/readiness, port: 4000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "500m", memory: 512Mi }
+            limits:   { cpu: "2",    memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          configMap: { name: litellm-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: gateway
+  labels: { app: litellm }
+  annotations:
+    # Internal LB: a private VNet IP only. The endpoint is never public.
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  selector: { app: litellm }
+  ports:
+    - { name: http, port: 4000, targetPort: 4000 }
