@@ -51,6 +51,11 @@ spec:
             - --max-model-len=16384
             - --gpu-memory-utilization=0.92
             - --disable-log-requests=false   # request metadata -> stdout -> Log Analytics
+            # Tool calling + streaming — required by Copilot CLI and agentic
+            # clients. The parser must match the model family; llama3_json is
+            # for Llama 3.x (the example model). See docs/running-a-model.md.
+            - --enable-auto-tool-choice
+            - --tool-call-parser=llama3_json
           ports:
             - containerPort: 8000
           env:

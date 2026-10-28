@@ -3,9 +3,9 @@
 # because the gateway lives on an internal load balancer only.
 #
 # The endpoint is OpenAI-compatible, so any client that accepts a base URL
-# works: the `llm` CLI, aider, Continue, Cline, Claude Code (ANTHROPIC/OpenAI
-# base override), or the openai SDK. NOTE: GitHub Copilot CLI cannot target a
-# custom endpoint, so use one of these OpenAI-compatible clients instead.
+# works: GitHub Copilot CLI (BYOK — see docs/connect-copilot-cli.md), the `llm`
+# CLI, aider, Continue, Cline, Claude Code (OpenAI base override), or the
+# openai SDK.
 set -euo pipefail
 
 GW_IP=$(kubectl -n gateway get svc litellm -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
@@ -32,6 +32,14 @@ llm -m private-llm "Summarise this repo's security posture."
 export OPENAI_API_BASE="$BASE"
 export OPENAI_API_KEY="\$LLM_KEY"
 aider --model openai/private-llm
+
+# --- or GitHub Copilot CLI (BYOK) -----------------------------------------
+# npm install -g @github/copilot   # sign in to GitHub on first run
+export COPILOT_PROVIDER_BASE_URL="$BASE"
+export COPILOT_MODEL="private-llm"
+export COPILOT_PROVIDER_API_KEY="\$LLM_KEY"
+copilot -p "Explain this repo's security posture." --model private-llm
+# Full guide + gotchas: docs/connect-copilot-cli.md
 
 # --- or the openai python SDK ---------------------------------------------
 # from openai import OpenAI

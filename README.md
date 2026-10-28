@@ -36,7 +36,7 @@ endpoint on a private IP.
 | Air-gapped artifacts | ACR + model-weights blob have `public_network_access = false` and are reachable only via private endpoints. Images and weights are seeded **once** (`seed-artifacts.sh`); at runtime vLLM runs with `HF_HUB_OFFLINE=1`. |
 | Monitored | Firewall logs (every allow **and** deny), Container Insights, and LiteLLM's per-request audit all stream to Log Analytics (KQL in `kubernetes/observability/audit-queries.kql`). Live metrics go to **Managed Prometheus**; dashboards in **Managed Grafana** (import `kubernetes/observability/grafana-dashboard-vllm.json`). Both private. |
 | Controlled access | Private API server, no local accounts (Entra ID + Azure RBAC). The LLM API is an **internal** load balancer; reachable only inside the VNet via Bastion/VPN. LiteLLM issues per-client virtual keys with budgets. |
-| CLI access | OpenAI-compatible endpoint → use the `llm` CLI, aider, Continue, Cline, or the OpenAI SDK (`connect-cli.sh`). |
+| CLI access | OpenAI-compatible endpoint → **GitHub Copilot CLI** (BYOK), the `llm` CLI, aider, Continue, Cline, or the OpenAI SDK. See `docs/connect-copilot-cli.md` and `scripts/connect-cli.sh`. |
 
 > **On "fully air-gapped":** Azure's *managed* AKS control plane requires a small set of
 > platform FQDNs (control-plane registration, MCR system images, Entra, time). These carry
@@ -45,9 +45,11 @@ endpoint on a private IP.
 > air-gap you additionally need a private package mirror and a private MCR cache in ACR, then
 > remove the firewall allow rules — see `docs/architecture.md`.
 
-> **On Copilot CLI:** GitHub Copilot CLI is hardwired to GitHub's backend and cannot target a
-> self-hosted endpoint. The platform exposes a standard OpenAI-compatible API, so any base-URL-aware
-> client works instead (`llm`, aider, Continue, Cline, OpenAI/Azure SDKs).
+> **On Copilot CLI:** GitHub Copilot CLI supports a custom OpenAI-compatible provider (BYOK) via
+> `COPILOT_PROVIDER_BASE_URL` + `COPILOT_MODEL`, so it can point at this platform's private endpoint
+> (the model must expose tool calling + streaming, which the deployment enables). Step-by-step in
+> [`docs/connect-copilot-cli.md`](docs/connect-copilot-cli.md). Any other base-URL-aware client
+> (`llm`, aider, Continue, Cline, OpenAI/Azure SDKs) works against the same endpoint too.
 
 ## Layout
 
@@ -61,6 +63,8 @@ kubernetes/
                   config, importable Grafana dashboard
 scripts/     seed-artifacts.sh (one-time ingress), deploy.sh, connect-cli.sh
 docs/        architecture.md — decisions, tradeoffs, hardening path
+             running-a-model.md — serve/swap a model + Llama 3.1 8B example
+             connect-copilot-cli.md — point GitHub Copilot CLI at the endpoint
              costs.md — cost model, Spot savings, cost levers
 ```
 
