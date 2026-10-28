@@ -99,25 +99,39 @@ resource "azurerm_kubernetes_cluster" "this" {
   }
 }
 
-# GPU pool: tainted so only the model server lands here. Nodes are labelled
-# for the NVIDIA device plugin / GPU operator (see kubernetes/base).
+# GPU pool: Spot VMs to cut the dominant cost. Tainted so only the model server
+# lands here. Azure also auto-adds the spot taint/label; pods tolerate both (see
+# kubernetes/base). TRADEOFF: Spot capacity can be reclaimed by Azure with ~30s
+# notice, so the LLM may be evicted and restart when capacity is tight. With
+# min_count = 0 the pool also scales to zero (scale vLLM to 0 to realise it).
 resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   name                  = "gpu"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.this.id
   vm_size               = var.gpu_node_vm_size
   auto_scaling_enabled  = true
   node_count            = var.gpu_node_count
-  min_count             = var.gpu_node_count
+  min_count             = var.gpu_min_count
   max_count             = var.gpu_node_max_count
   vnet_subnet_id        = azurerm_subnet.aks.id
   orchestrator_version  = var.kubernetes_version
   os_disk_size_gb       = 256
 
+  # Spot configuration. spot_max_price = -1 means "pay up to the on-demand
+  # price and never get evicted on price" (eviction still happens on capacity).
+  priority        = "Spot"
+  eviction_policy = "Delete"
+  spot_max_price  = var.gpu_spot_max_price
+
   node_labels = {
-    "workload" = "llm"
+    "workload"    = "llm"
     "accelerator" = "nvidia"
+    # Required label on a Spot pool; must match the auto-applied value.
+    "kubernetes.azure.com/scalesetpriority" = "spot"
   }
-  node_taints = ["nvidia.com/gpu=present:NoSchedule"]
+  node_taints = [
+    "nvidia.com/gpu=present:NoSchedule",
+    "kubernetes.azure.com/scalesetpriority=spot:NoSchedule",
+  ]
 
   tags = var.tags
 

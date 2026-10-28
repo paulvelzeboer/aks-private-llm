@@ -61,6 +61,7 @@ kubernetes/
                   config, importable Grafana dashboard
 scripts/     seed-artifacts.sh (one-time ingress), deploy.sh, connect-cli.sh
 docs/        architecture.md — decisions, tradeoffs, hardening path
+             costs.md — cost model, Spot savings, cost levers
 ```
 
 ## Deploy
@@ -101,9 +102,22 @@ object ID) in Terraform to get Grafana Admin, or assign the role afterwards. GPU
 (SM %, memory, temp) need a DCGM exporter DaemonSet seeded into ACR; the included vLLM KV-cache
 panel approximates GPU pressure without it.
 
-## Cost note
+## Cost
 
-The expensive line item is the GPU pool (`Standard_NC24ads_A100_v4`, ~1×A100 80GB) plus
-Azure Firewall and Bastion (each a fixed hourly base). Scale the GPU pool to zero when idle
-(`gpu_node_count`/autoscaler) to cut the dominant cost; firewall and Bastion remain while the
-control perimeter is up.
+The GPU pool dominates the bill, so it runs on **Spot by default** (`priority = "Spot"` in
+`terraform/aks.tf`) — typically **~60–90% cheaper** than on-demand, with the tradeoff that Azure
+can reclaim the node (~30s notice) and the model pod restarts. `gpu_min_count = 0` also lets the
+pool scale to zero when idle.
+
+Rough West Europe pay-as-you-go monthly estimates (full breakdown + levers in
+[`docs/costs.md`](docs/costs.md)):
+
+| Scenario | ~ Monthly |
+|---|---|
+| On-demand GPU, 24/7 | ~$4,100–4,300 |
+| **Spot GPU, 24/7 (default)** | **~$2,100–2,600** |
+| Spot GPU, business hours + scale-to-zero | ~$1,700–1,850 |
+
+A fixed security perimeter (Azure Firewall ~$900/mo, Bastion, system pool, observability) is
+~$1,550/mo and stays up while the platform exists — once the GPU scales down, it dominates. For
+guaranteed uptime, switch the GPU pool back to on-demand. See `docs/costs.md` for cheaper-SKU levers.

@@ -58,13 +58,26 @@ variable "gpu_node_vm_size" {
 }
 
 variable "gpu_node_count" {
-  type    = number
-  default = 1
+  description = "Initial GPU node count."
+  type        = number
+  default     = 1
+}
+
+variable "gpu_min_count" {
+  description = "Autoscaler floor. 0 lets the Spot pool scale to zero when idle."
+  type        = number
+  default     = 0
 }
 
 variable "gpu_node_max_count" {
   type    = number
   default = 3
+}
+
+variable "gpu_spot_max_price" {
+  description = "Max USD/hour for Spot GPU nodes. -1 = pay up to on-demand (recommended; evicts only on capacity, never on price)."
+  type        = number
+  default     = -1
 }
 
 # IP ranges permitted to reach the private endpoint via Bastion/VPN.

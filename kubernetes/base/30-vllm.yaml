@@ -33,6 +33,11 @@ spec:
           operator: Equal
           value: present
           effect: NoSchedule
+        # GPU pool runs on Spot; tolerate the auto-applied Spot taint.
+        - key: kubernetes.azure.com/scalesetpriority
+          operator: Equal
+          value: spot
+          effect: NoSchedule
       containers:
         - name: vllm
           # Seed this image into ACR first (scripts/seed-artifacts.sh).
